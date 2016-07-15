@@ -23,6 +23,15 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="bnBNC.py" />
+    <Compile Include="BNCS.py">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Bouncer.py">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="DataBuffers.py">
+      <SubType>Code</SubType>
+    </Compile>
   </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
