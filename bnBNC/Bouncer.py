@@ -4,12 +4,16 @@ from threading import Thread
 from BNCS import *
 from DataBuffers import *
 
+from Daemons import ServerCleanupDaemon
+
 class BouncerServer():
     def __init__(self, port=6112):
         self.port = port
         self.socket = socket(AF_INET, SOCK_STREAM)
 
         self.clients = {}
+
+        self.cleanup = ServerCleanupDaemon(self, 60)
        
     # Returns the next available client key
     def getNextKey(self, dic):
