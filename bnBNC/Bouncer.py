@@ -212,6 +212,8 @@ class ProxyClient(Thread):
                         self.linkRemote(self.pair.server.remotes[clientId].remote)
                         print("<{0}> Resumed connection.".format(self.getClientID()))
                         self.sendControlMessage("RESUME", "OK")
+
+                        self.pair.remote.sendResume(self)
                     else:
                         self.sendControlMessage("RESUME", "FAIL Not authorized")
                         self.close()

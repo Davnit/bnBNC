@@ -2,7 +2,25 @@ from struct import *
 from threading import *
 from socket import *
 
-from DataBuffers import DataWriter
+from DataBuffers import *
+
+chatEventIds = {
+    0x01: "ShowUser",
+    0x02: "UserJoin",
+    0x03: "UserLeave",
+    0x04: "Whisper",
+    0x05: "Talk",
+    0x06: "Broadcast",
+    0x07: "Channel",
+    0x09: "UserFlags",
+    0x0A: "WhisperSent",
+    0x0D: "ChannelFull",
+    0x0E: "ChannelDoesNotExist",
+    0x0F: "ChannelRestricted",
+    0x12: "Info",
+    0x13: "Error",
+    0x17: "Emote"
+}
 
 def receiveBncsPacket(client):
     # Receive 4 byte header
@@ -29,6 +47,37 @@ def receiveBncsPacket(client):
     else:
         return None
 
+def getChatEventName(eventId):
+    if eventId in chatEventIds:
+        return chatEventIds[eventId]
+    else:
+        return "Unknown"
+
+def buildEventPacket(event):
+    dw = DataWriter()
+    dw.writeInt32(event.eventID)
+    dw.writeInt32(event.flags)
+    dw.writeInt32(event.ping)
+    dw.writeRaw(bytes(12))
+    dw.writeString(event.user)
+    dw.writeString(event.text)
+
+    pak = BNCSPacket(0x0f)
+    pak.setData(dw.data)
+    return pak
+
+def buildUserPacket(user):
+    dw = DataWriter()
+    dw.writeInt32(0x01)
+    dw.writeInt32(user.flags)
+    dw.writeInt32(user.ping)
+    dw.writeRaw(bytes(12))
+    dw.writeString(user.name)
+    dw.writeString(user.statstring)
+
+    pak = BNCSPacket(0x0f)
+    pak.setData(dw.data)
+    return pak
 
 class BNCSPacket():
     def __init__(self, header):
@@ -66,6 +115,27 @@ class BNCSPacket():
         dw.writeRaw(self.data)          # Packet data
         return dw.data
 
+class ChatEvent():
+    def __init__(self, packet):
+        dr = DataReader(packet.data)
+
+        self.eventID = dr.readInt32()
+        self.flags = dr.readInt32()
+        self.ping = dr.readInt32()
+        dr.readRaw(12)
+        self.user = dr.readString()
+        self.text = dr.readString()
+
+    def toString(self):
+        return "[{0}] <{1}> {2}".format(getChatEventName(self.eventID), self.user, self.text)
+
+class ChatUser():
+    def __init__(self, event):
+        self.name = event.user
+        self.statstring = event.text
+        self.ping = event.ping
+        self.flags = event.flags
+
 class BnetClient(Thread):
     def __init__(self):
         Thread.__init__(self)
@@ -75,8 +145,16 @@ class BnetClient(Thread):
         self.port = -1
         self.isConnected = False
 
+        self.resetChatState()
+
     def getClientID(self):
         return "Unknown Client" if self.pair is None else self.pair.getClientID()
+
+    def resetChatState(self):
+        self.enterChat = None
+        self.channelJoin = None
+        self.channelOrder = []
+        self.channelList = {}
 
     def close(self):
         self.isConnected = False
@@ -103,6 +181,18 @@ class BnetClient(Thread):
 
         self.isConnected = True
         self.sendPacket(bytes(b'\x01'))       # Protocol selector 0x01
+        
+        self.resetChatState()
+
+    def sendResume(self, client):
+        if client is None: return
+
+        client.sendPacket(self.enterChat)
+        client.sendPacket(buildEventPacket(self.channelJoin))
+        
+        for name in self.channelOrder:
+            if name in self.channelList:
+                client.sendPacket(buildUserPacket(self.channelList[name]))
 
     def run(self):
         while self.isConnected: 
@@ -120,6 +210,31 @@ class BnetClient(Thread):
                     # Echo ping requests
                     if packet.packetID == 0x25:
                         self.sendPacket(packet)
+
+                # Cache chat events for resume
+                if packet.packetID == 0x0a:
+                    self.resetChatState()
+                    self.enterChat = packet
+
+                elif packet.packetID == 0x0f:
+                    e = ChatEvent(packet)
+                    if e.eventID == 0x07:   # join channel
+                        self.channelJoin = e
+                        self.channelOrder.clear()
+                        self.channelList.clear()
+                    else:
+                        usr = ChatUser(e)
+                        if e.eventID in [ 0x01, 0x02 ]: # show user / join
+                            self.channelOrder.append(usr.name)
+                            self.channelList[usr.name] = usr
+                        elif e.eventID == 0x09:         # flag update
+                            if usr.name in self.channelList:
+                                self.channelList[usr.name].flags = usr.flags
+                        elif e.eventID == 0x03:         # user leave
+                            if usr.name in self.channelList:
+                                self.channelList[usr.name] = None
+                            if usr.name in self.channelOrder:
+                                self.channelOrder.remove(usr.name)
 
         print("<{0}> Disconnected from BNET".format(self.getClientID()))
         if self.pair.isControlConnected():
