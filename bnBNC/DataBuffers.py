@@ -46,7 +46,7 @@ class DataReader():
             if self.data[idx] == 0x00:
                 break
             idx += 1
-        s = self.data[self.position:idx].decode("utf-8")
+        s = self.data[self.position:idx].decode("ISO-8859-1")
         self.position = idx + 1
         return s
 
