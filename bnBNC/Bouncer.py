@@ -15,6 +15,7 @@ class BouncerServer():
         self.whitelist = whitelist
 
         self.clients = {}
+        self.remotes = {}
         self.cleanup = ServerCleanupDaemon(self, 60)
        
     # Returns the next available client key
@@ -26,11 +27,15 @@ class BouncerServer():
             else: i += 1
         return i
 
+    def containsRemote(self, remoteId):
+        return remoteId in self.remotes
+
     def run(self):
         self.socket.bind(('localhost', self.port))
         self.socket.listen()
 
         self.clients.clear()
+        self.remotes.clear()
 
         print("<Server> Server started. Listening for incoming clients...")
         while 1:
@@ -70,11 +75,17 @@ class ClientPair():
     def isRemoteConnected(self):
         return (self.remote is not None) and (self.remote.isConnected)
 
+class RemoteInfo():
+    def __init__(self, id, owner, remote):
+        self.id = id
+        self.owner = owner      # Username of the owner of this remote
+        self.remote = remote
 
 class ProxyClient(Thread):
     def __init__(self, sock, addr):
         Thread.__init__(self)
         self.pair = None
+        self.user = None
 
         self.client = sock
         self.address = addr
@@ -92,7 +103,7 @@ class ProxyClient(Thread):
     # Sends a control packet to the client
     def sendControlMessage(self, command, params):
         if params is not None:
-            command += " " + params
+            command += " " + str(params)
 
         # Packet contents
         wt = DataWriter()
@@ -112,6 +123,11 @@ class ProxyClient(Thread):
             print("<{0}> Attempted unauthorized action: {1}".format(self.getClientID(), action))
             self.close()
             return False
+
+    # Links a remote socket to the client
+    def linkRemote(self, remote):
+        remote.pair = self.pair
+        self.pair.remote = remote
 
     # Handles a control packet from the client
     def handleControlPacket(self, packet):
@@ -135,7 +151,8 @@ class ProxyClient(Thread):
                         self.sendControlMessage("LOGIN", "FAIL Incorrect password")
             
             if self.isAuthed:
-                print("<{0}> Logged in as: {1}".format(self.getClientID(), cmd[1]))
+                self.user = cmd[1]
+                print("<{0}> Logged in as: {1}".format(self.getClientID(), self.user))
             else:
                 self.close()
 
@@ -159,22 +176,42 @@ class ProxyClient(Thread):
             if len(cmd) > 2 and len(cmd[2]) > 0: port = int(cmd[2])
 
             remote = BnetClient()
-            remote.pair = self.pair
-            self.pair.remote = remote
+            self.linkRemote(remote)
 
             remote.connect(server, port)
             print("<{0}> Requested connection to server: {1}".format(self.getClientID(), server))
 
             if remote.isConnected:
                 self.sendControlMessage("CONNECT", "OK " + remote.socket.getpeername()[0])
-                remote.start()  # Start receiving data
                 print("<{0}> Connection successful.".format(self.getClientID()))
+                remote.start()  # Start receiving data
+                
+                remoteId = remote.socket.getsockname()[1]
+                self.sendControlMessage("CLIENTID", remoteId)
+
+                self.pair.server.remotes[remoteId] = RemoteInfo(remoteId, self.user, remote)
             else:
                 print("<{0}> Connection failed.".format(self.getClientID()))
 
         elif (cmd[0] == "DISCONNECT"):  # Request for disconnection
             if self.pair.isRemoteConnected():
                 self.pair.remote.close()
+
+        elif (cmd[0] == "RESUME"):      # Resume existing connection
+            if len(cmd) > 1:            
+                clientId = int(cmd[1])
+                if self.pair.server.containsRemote(clientId):
+                    if self.pair.server.remotes[clientId].owner == self.user:
+                        self.linkRemote(self.pair.server.remotes[clientId].remote)
+                        print("<{0}> Resumed connection.".format(self.getClientID()))
+                        self.sendControlMessage("RESUME", "OK")
+                    else:
+                        self.sendControlMessage("RESUME", "FAIL Not authorized")
+                        self.close()
+                else:
+                    self.sendControlMessage("RESUME", "FAIL Client does not exist")
+            else:
+                self.sendControlMessage("RESUME", "FAIL No ID specified")
         else:
             print("<{0}> Unrecognized command: {1}".format(self.getClientID(), cmd[0]))
 
@@ -201,6 +238,5 @@ class ProxyClient(Thread):
                         self.pair.remote.sendPacket(packet)
 
         print("<{0}> Disconnected".format(self.getClientID()))
-        if self.pair.isRemoteConnected():
-            self.pair.remote.close()
+
 
