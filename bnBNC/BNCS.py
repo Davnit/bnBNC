@@ -116,6 +116,10 @@ class BnetClient(Thread):
                 if (self.pair is not None) and self.pair.isControlConnected():
                     # Forward all data to the control client
                     self.pair.control.sendPacket(packet)
+                else:
+                    # Echo ping requests
+                    if packet.packetID == 0x25:
+                        self.sendPacket(packet)
 
         print("<{0}> Disconnected from BNET".format(self.getClientID()))
         if self.pair.isControlConnected():

@@ -4,7 +4,7 @@ from threading import Thread
 from BNCS import *
 from DataBuffers import *
 
-from Daemons import ServerCleanupDaemon
+from Daemons import ServerCleanupDaemon, RemoteKeepAliveDaemon
 
 class BouncerServer():
     def __init__(self, userDB, whitelist, port=6112):
@@ -16,7 +16,8 @@ class BouncerServer():
 
         self.clients = {}
         self.remotes = {}
-        self.cleanup = ServerCleanupDaemon(self, 60)
+        self.cleanup = ServerCleanupDaemon(self, 60)            # every minute
+        self.remoteAlive = RemoteKeepAliveDaemon(self, 480)     # every 8 minutes
        
     # Returns the next available client key
     def getNextKey(self, dic):
