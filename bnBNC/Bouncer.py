@@ -7,10 +7,11 @@ from DataBuffers import *
 from Daemons import ServerCleanupDaemon
 
 class BouncerServer():
-    def __init__(self, port=6112):
+    def __init__(self, userDB, port=6112):
         self.port = port
         self.socket = socket(AF_INET, SOCK_STREAM)
 
+        self.db = userDB
         self.clients = {}
 
         self.cleanup = ServerCleanupDaemon(self, 60)
@@ -71,9 +72,14 @@ class ProxyClient(Thread):
         self.address = addr
 
         self.isConnected = True
+        self.isAuthed = False
 
     def getClientID(self):
         return "Unknown Client" if self.pair is None else self.pair.getClientID()
+
+    def close(self):
+        self.isConnected = False
+        self.client.close()
 
     # Sends a control packet to the client
     def sendControlMessage(self, command, params):
@@ -90,13 +96,48 @@ class ProxyClient(Thread):
 
         self.client.send(pak.buildPacket())
 
+    def checkAuth(self, action):
+        if self.pair.server.db is None or self.isAuthed:
+            return True
+        else:
+            self.sendControlMessage(action, "FAIL Not authorized")
+            print("<{0}> Attempted unauthorized action: {1}".format(self.getClientID(), action))
+            self.close()
+            return False
+
     # Handles a control packet from the client
     def handleControlPacket(self, packet):
         rd = DataReader(packet.data)
         
         cmd = rd.readString().split(' ')
 
-        if (cmd[0].startswith("CONNECT")):  # Request for new connection
+        if (cmd[0] == "LOGIN"):       # Login request
+            if len(cmd) < 3:
+                self.sendControlMessage("LOGIN", "FAIL Invalid request")
+            else:
+                if self.pair.server.db is None:
+                    # No authentication enabled
+                    self.sendControlMessage("LOGIN", "OK")
+                    self.isAuthed = True
+                else:
+                    if self.pair.server.db.validatePassword(cmd[1], cmd[2]):
+                        self.sendControlMessage("LOGIN", "OK")
+                        self.isAuthed = True
+                    else:
+                        self.sendControlMessage("LOGIN", "FAIL Incorrect password")
+            
+            if self.isAuthed:
+                print("<{0}> Logged in as: {1}".format(self.getClientID(), cmd[1]))
+            else:
+                self.close()
+
+            return
+
+        # All other actions require login
+        if not self.checkAuth(cmd[0]):
+            return
+
+        if (cmd[0] == "CONNECT"):   # Request for new connection
             server = ''
             port = 6112
 

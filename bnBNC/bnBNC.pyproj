@@ -29,6 +29,9 @@
     <Compile Include="Bouncer.py">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="Config.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="Daemons.py">
       <SubType>Code</SubType>
     </Compile>
