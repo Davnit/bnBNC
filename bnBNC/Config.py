@@ -13,9 +13,6 @@ class UserDB():
         else:
             self.data = []
 
-        for d in self.data:
-            print(d)
-
     def count(self):
         return len(self.data)
 
@@ -34,3 +31,21 @@ class UserDB():
 
         pw = base64.b64decode(password)
         return hashlib.md5(pw).hexdigest() == user[1]
+
+class IPList():
+    def __init__(self, filePath):
+        self.filePath = filePath
+
+        if path.isfile(filePath):
+            with open(filePath, 'rt') as file:
+                self.data = file.readlines()
+        else:
+            self.data = []
+
+    def count(self):
+        return len(self.data)
+
+    def containsIP(self, ip):
+        for item in self.data:
+            if str(item) == str(ip): return True
+        return False

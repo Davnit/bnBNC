@@ -7,13 +7,14 @@ from DataBuffers import *
 from Daemons import ServerCleanupDaemon
 
 class BouncerServer():
-    def __init__(self, userDB, port=6112):
+    def __init__(self, userDB, whitelist, port=6112):
         self.port = port
         self.socket = socket(AF_INET, SOCK_STREAM)
 
         self.db = userDB
-        self.clients = {}
+        self.whitelist = whitelist
 
+        self.clients = {}
         self.cleanup = ServerCleanupDaemon(self, 60)
        
     # Returns the next available client key
@@ -33,7 +34,14 @@ class BouncerServer():
 
         print("<Server> Server started. Listening for incoming clients...")
         while 1:
+            
             sock, addr = self.socket.accept()
+
+            # Check IP whitelist
+            if self.whitelist is not None:
+                if not self.whitelist.containsIP(addr[0]):
+                    sock.close()
+                    continue
             
             pair = ClientPair(self.getNextKey(self.clients))
             pair.server = self
