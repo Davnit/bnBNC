@@ -113,7 +113,13 @@ class ProxyClient(Thread):
         pak = BNCSPacket(0xef)
         pak.setData(wt.data)
 
-        self.client.send(pak.buildPacket())
+        self.sendPacket(pak)
+
+    def sendPacket(self, packet):
+        try:
+            self.client.send(packet.buildPacket())
+        except ConnectionAbortedError:
+            self.isConnected = False
 
     def checkAuth(self, action):
         if self.pair.server.db is None or self.isAuthed:

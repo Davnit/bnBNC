@@ -115,7 +115,7 @@ class BnetClient(Thread):
             if packet is not None:
                 if (self.pair is not None) and self.pair.isControlConnected():
                     # Forward all data to the control client
-                    self.pair.control.client.send(packet.buildPacket())
+                    self.pair.control.sendPacket(packet)
 
         print("<{0}> Disconnected from BNET".format(self.getClientID()))
         if self.pair.isControlConnected():
