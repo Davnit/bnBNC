@@ -43,10 +43,10 @@ class DataReader():
     def readString(self):
         idx = self.position
         while idx < self.length():
-            if self.data[idx] == b'\x00':
+            if self.data[idx] == 0x00:
                 break
             idx += 1
-        s = self.data[self.position:idx - 1].decode("utf-8")
+        s = self.data[self.position:idx].decode("utf-8")
         self.position = idx + 1
         return s
 
