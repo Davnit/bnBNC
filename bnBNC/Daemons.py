@@ -17,7 +17,7 @@ class ServerCleanupDaemon(Thread):
                 self.server.clients[i] = None
 
         for i, r in self.server.remotes.items():
-            if (r is not None) and (not r.isConnected):
+            if (r is not None) and (not r.remote.isConnected):
                 self.server.remotes[i] = None
 
     def run(self):
