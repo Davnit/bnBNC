@@ -245,3 +245,4 @@ ModelManifest.xml
 .fake/
 *.pyc
 bnBNC/users.txt
+bnBNC/whitelist.txt
