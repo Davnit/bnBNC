@@ -1,0 +1,252 @@
+Script("Name") = "Bouncer Support"
+Script("Author") = "Pyro"
+Script("Major") = 0
+Script("Minor") = 1
+Script("Description") = "Allows the bot to connect to Battle.net through a bnBNC proxy server."
+
+'// This script was built for release 0.1-alpha of bnBNC, available here:
+'// https://github.com/Davnit/bnBNC/releases/tag/0.1-alpha
+'//
+'// DO NOT ATTEMPT TO CONNECT DIRECTLY TO A BATTLE.NET SERVER WHILE THIS SCRIPT IS ENABLED
+'//  YOU WILL BE IP BANNED FOR ~5 MINUTES
+'//
+'// INSTRUCTIONS
+'//   1. Set your Battle.net server to the IP or hostname of the bnBNC server.
+'//   2. In scripts.ini, under [Bouncer Support], set the following keys:
+'//     - BnetServer=useast.battle.net (or whichever server you want to connect to)
+'//     - User=Test (replace with your username on the bnBNC server)
+'//     - Password=abc123 (replace with your server password (NOT YOUR BATTLE.NET PASSWORD)
+
+
+Public BouncerConnected, ClientID
+Public BnetServer, ServerIP
+
+Private FirstPacketIDs, FirstPacket
+
+Const BNET_PORT = 6112
+
+Const SID_CONTROL = &HEF
+
+
+Sub Event_Load()
+    BnetServer = GetSettingsEntry("BnetServer")
+    If Len(BnetServer) = 0 Then
+        BnetServer = "asia.battle.net"
+    End If
+    
+    ClientID = GetSettingsEntry("ClientID")
+
+    FirstPacketIDs = Array(&H50, &H1E, &H05)    ' Identify the start of a logon
+    Call ResetBouncerState()
+End Sub
+
+Sub Event_Close()
+    WriteSettingsEntry "BnetServer", BnetServer
+End Sub
+
+Sub Event_LoggedOff()
+    Call ResetBouncerState()
+End Sub
+
+Sub Event_PacketSent(Protocol, ID, Length, Data)
+    If CheckIfOfficialServer() Then Exit Sub
+    If Not Protocol = "BNCS" Then Exit Sub
+    
+    If (Not BouncerConnected) And (Len(BnetServer) > 0) Then
+        ' Intercept logon
+        If FirstPacket Is Nothing And InArray(FirstPacketIDs, ID) Then
+            AddChat vbGreen, "[Bounce] Intercepted connection"
+            
+            Set FirstPacket = DataBufferEx()
+            FirstPacket.Data = Data
+            VetoThisMessage
+            
+            Call InitiateBouncerLogin()
+        End If
+    End If            
+End Sub
+
+Sub Event_PacketReceived(Protocol, ID, Length, Data)
+    If CheckIfOfficialServer() Then Exit Sub
+    If Not Protocol = "BNCS" Then Exit Sub
+    
+    Select Case ID
+        Case SID_CONTROL
+            HandleControlMessage Mid(Data, 5)  
+    End Select
+End Sub
+
+Sub ResetBouncerState()
+    Set FirstPacket = Nothing
+    BouncerConnected = False
+End Sub
+
+Sub SetClientID(NewID)
+    ClientID = NewID
+    WriteSettingsEntry "ClientID", ClientID
+End Sub
+
+Sub InitiateBouncerLogin()
+    If Len(BnetServer) = 0 Then
+        AddChat vbRed, "[Bounce] No server set."
+        Exit Sub
+    End If
+    
+    User = GetSettingsEntry("User")
+    Pass = GetSettingsEntry("Password")
+    
+    If Len(User) > 0 And Len(Pass) > 0 Then
+        AddChat vbYellow, "[Bounce] Logging in..."
+        SendControlMessage "LOGIN " & User & Space(1) & Base64Encode(Pass)
+    Else
+        RequestConnect BnetServer, BNET_PORT
+    End If
+End Sub
+
+Sub RequestConnect(Server, Port)
+    AddChat vbYellow, "[Bounce] Requesting connection to " & Server & "..."
+    SendControlMessage "CONNECT " & Server & Space(1) & CStr(Port)
+End Sub
+
+Sub RequestResume(ID)
+    AddChat vbYellow, "[Bounce] Resuming connection..."
+    SendControlMessage "RESUME " & CStr(ClientID)
+End Sub
+
+Sub SendControlMessage(Message)
+    Set packet = DataBufferEx()
+    packet.InsertNTString CStr(Message)
+    
+    packet.SendPacket SID_CONTROL
+End Sub
+
+Sub HandleControlMessage(Data)
+
+    Set packet = DataBufferEx()
+    packet.Data = Data
+    
+    Cmd = Split(packet.GetString(), Space(1))
+    
+    Select Case UCase(Cmd(0))
+        Case "LOGIN"
+            If UCase(Cmd(1)) = "OK" Then
+                AddChat vbGreen, "[Bounce] Login accepted."
+            
+                If Len(ClientID) > 0 Then
+                    RequestResume ClientID
+                Else
+                    RequestConnect BnetServer, BNET_PORT
+                End If
+            Else
+                AddChat vbRed, "[Bounce] Login failed: " & JoinArray(Cmd, Space(1), 2)
+                Call ResetBouncerState()
+            End If
+        Case "CONNECT"
+            If (Not (FirstPacket Is Nothing)) And (UBound(Cmd) > 0) Then
+                If UCase(Cmd(1)) = "OK" Then
+                    BouncerConnected = True
+
+                    If UBound(Cmd) > 1 Then ServerIP = Cmd(2)
+            
+                    AddChat vbGreen, "[Bounce] Connection accepted."
+                    AddChat vbYellow, "[Bounce] Continuing logon to BNCS..."
+        
+                    PacketID = Asc(Mid(FirstPacket.Data, 2, 1))
+                    FirstPacket.Data = Mid(FirstPacket.Data, 5)
+                    FirstPacket.SendPacket CByte(PacketID)
+                Else
+                    If UBound(Cmd) > 1 Then
+                        AddChat vbRed, "[Bounce] Connection failed: " & JoinArray(Cmd, Space(1), 2)
+                    Else
+                        AddChat vbRed, "[Bounce] Connection failed."
+                    End If
+                    
+                    Call ResetBouncerState()
+                End If
+            End If
+        Case "DISCONNECT"
+            AddChat vbRed, "[Bounce] Lost connection to remote server."
+            SetClientID vbNullString
+        Case "RESUME"
+            If UCase(Cmd(1)) = "OK" Then
+                AddChat vbGreen, "[Bounce] Connection resumed."
+            Else
+                AddChat vbRed, "[Bounce] Unable to resume connection: " & JoinArray(Cmd, Space(1), 2)
+                SetClientID vbNullString
+                Call RequestConnect(BnetServer, BNET_PORT)
+            End If
+        Case "CLIENTID"
+            SetClientId Cmd(1)
+    End Select
+End Sub
+
+Function BuildPacket(Data, ID)
+    Set Packet = DataBufferEx()
+    Packet.InsertByte &HFF
+    Packet.InsertByte ID
+    Packet.InsertWORD Len(Data) + 4
+    Packet.InsertNonNTString Data
+    
+    BuildPacket = Packet.Data
+End Function
+
+Function CheckIfOfficialServer()
+    Select Case Config.Server
+        Case "useast.battle.net"
+        Case "uswest.battle.net"
+        Case "europe.battle.net"
+        Case "asia.battle.net"
+            CheckIfOfficialServer = True
+        Case Else
+            CheckIfOfficialServer = False
+    End Select
+End Function
+
+Function JoinArray(array, delim, startIndex)
+    result = vbNullString
+    For I = startIndex To UBound(array)
+        result = result & array(I) & delim
+    Next
+    JoinArray = Left(result, Len(result) - Len(delim))
+End Function
+
+Function InArray(array, value)
+    For Each Item In array
+        If Item = value Then
+            InArray = True
+            Exit Function
+        End If
+    Next
+    InArray = False
+End Function
+
+Function Base64Encode(Data)
+    ' From: http://www.motobit.com/tips/detpg_Base64Encode/
+    
+    sOut = vbNullString
+    
+    Const Base64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    For I = 1 To Len(Data) Step 3
+        nGroup = Oct(&H10000 * Asc(Mid(Data, I, 1)) + &H100 * AscEx(Mid(Data, I + 1, 1)) + AscEx(Mid(Data, I + 2, 1)))
+        nGroup = String(8 - Len(nGroup), "0") & nGroup
+        
+        pOut = Mid(Base64, CLng("&o" & Mid(nGroup, 1, 2)) + 1, 1) + _
+               Mid(Base64, CLng("&o" & Mid(nGroup, 3, 2)) + 1, 1) + _
+               Mid(Base64, CLng("&o" & Mid(nGroup, 5, 2)) + 1, 1) + _
+               Mid(Base64, CLng("&o" & Mid(nGroup, 7, 2)) + 1, 1)
+               
+        sOut = sOut & pOut
+    Next
+    
+    Select Case Len(Data) Mod 3
+        Case 1:
+            sOut = Left(sOut, Len(sOut) - 2) + "=="
+        Case 2:
+            sOut = Left(sOut, Len(sOut) - 1) + "="
+    End Select
+    Base64Encode = sOut
+End Function
+
+Function AscEx(chr)
+    If chr = "" Then AscEx = 0 Else AscEx = Asc(chr)
+End Function
